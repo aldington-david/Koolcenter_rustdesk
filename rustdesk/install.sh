@@ -162,17 +162,25 @@ install_now() {
 	dbus set rustdesk_hbbs_version=$rustdesk_hbbs_version
 
 	# 设置证书信息
-	rustdesk_key_pub_tmp=$(dbus get rustdesk_key_pub)
-	rustdesk_key_priv_tmp=$(dbus get rustdesk_key_priv)
-	/koolshare/bin/rustdesk-utils genkeypair | awk '{print $3}' >/tmp/upload/rustdesk_key_cert.tmp
-	if [ -z "${rustdesk_key_pub_tmp}" -o -z "${rustdesk_key_priv_tmp}" ]; then
-		rustdesk_key_pub_tmp=$(cat /tmp/upload/rustdesk_key_cert.tmp | awk 'FNR == 1')
-		rustdesk_key_priv_tmp=$(cat /tmp/upload/rustdesk_key_cert.tmp | awk 'FNR == 2')
+	if [ -s /koolshare/configs/rustdesk/id_ed25519 ] && [ -s /koolshare/configs/rustdesk/id_ed25519.pub ]; then
+		rustdesk_key_pub_tmp=$(cat /koolshare/configs/rustdesk/id_ed25519.pub)
+		rustdesk_key_priv_tmp=$(cat /koolshare/configs/rustdesk/id_ed25519)
+	elif [ -e /koolshare/configs/rustdesk/id_ed25519 ] || [ -e /koolshare/configs/rustdesk/id_ed25519.pub ]; then
+		echo_date "现有密钥文件不完整，请先从备份恢复 id_ed25519 和 id_ed25519.pub 后再更新。"
+		return 1
+	else
+		rustdesk_key_pub_tmp=$(dbus get rustdesk_key_pub)
+		rustdesk_key_priv_tmp=$(dbus get rustdesk_key_priv)
+		if [ -z "${rustdesk_key_pub_tmp}" -o -z "${rustdesk_key_priv_tmp}" ]; then
+			local generated_keys=$(/koolshare/bin/rustdesk-utils genkeypair) || return 1
+			rustdesk_key_pub_tmp=$(printf '%s\n' "$generated_keys" | awk 'NR == 1 {print $3}')
+			rustdesk_key_priv_tmp=$(printf '%s\n' "$generated_keys" | awk 'NR == 2 {print $3}')
+		fi
+		[ -n "$rustdesk_key_pub_tmp" ] && [ -n "$rustdesk_key_priv_tmp" ] || return 1
+		(umask 077; printf '%s' "$rustdesk_key_priv_tmp" >/koolshare/configs/rustdesk/id_ed25519) || return 1
+		printf '%s' "$rustdesk_key_pub_tmp" >/koolshare/configs/rustdesk/id_ed25519.pub || return 1
 	fi
-	rm -f /tmp/upload/rustdesk_key_cert.tmp >/dev/null 2>&1
-	# 写入证书
-	echo -n $rustdesk_key_pub_tmp >/koolshare/configs/rustdesk/id_ed25519.pub
-	echo -n $rustdesk_key_priv_tmp >/koolshare/configs/rustdesk/id_ed25519
+	chmod 600 /koolshare/configs/rustdesk/id_ed25519
 	# 设置证书
 	dbus set rustdesk_key_pub=$rustdesk_key_pub_tmp
 	dbus set rustdesk_key_priv=$rustdesk_key_priv_tmp

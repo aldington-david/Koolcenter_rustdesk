@@ -1,70 +1,39 @@
-#!/usr/bin/env python
-# _*_ coding:utf-8 _*_
+#!/usr/bin/env python3
+"""Build the Software Center offline package with Python 3."""
 
-import os
-import sys
-import json
-import codecs
 import hashlib
-from string import Template
+import json
+from pathlib import Path
+import tarfile
 
-if sys.getdefaultencoding() != 'gbk':
-    reload(sys)
-    sys.setdefaultencoding('gbk')
 
-parent_path = os.path.dirname(os.path.realpath(__file__))
+ROOT = Path(__file__).resolve().parent
 
-def md5sum(full_path):
-    with open(full_path, 'rb') as rf:
-        return hashlib.md5(rf.read()).hexdigest()
-
-def get_or_create():
-    conf_path = os.path.join(parent_path, "config.json.js")
-    conf = {}
-    if not os.path.isfile(conf_path):
-        print u"config.json.js not found，build.py is root path. auto write config.json.js"
-        module_name = os.path.basename(parent_path)
-        conf["module"] = module_name
-        conf["version"] = "0.0.1"
-        conf["home_url"] = ("Module_%s.asp" % module_name)
-        conf["title"] = "title of " + module_name
-        conf["description"] = "description of " + module_name
-    else:
-        with codecs.open(conf_path, "r", "utf-8") as fc:
-            conf = json.loads(fc.read())
-    return conf
 
 def build_module():
-    try:
-        conf = get_or_create()
-    except:
-        print u"config.json.js file format is incorrect"
-        traceback.print_exc()
-    if "module" not in conf:
-        print u" module is not in config.json.js"
-        return
-    module_path = os.path.join(parent_path, conf["module"])
-    if not os.path.isdir(module_path):
-        print u"not found %s dir，check config.json.js is module ?" % module_path
-        return
-    install_path = os.path.join(parent_path, conf["module"], "install.sh")
-    if not os.path.isfile(install_path):
-        print u"not found %s file，check install.sh file"
-        return
-    print u"build..."
+    config_path = ROOT / "config.json.js"
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    module = config["module"]
+    module_path = ROOT / module
+    if not (module_path / "install.sh").is_file():
+        raise FileNotFoundError(module_path / "install.sh")
+    (module_path / "version").write_text(config["version"], encoding="utf-8")
 
-    open(parent_path + "/" + conf["module"] + "/" +"version", "w").write(conf["version"])
-    
-    t = Template("cd $parent_path && rm -f $module.tar.gz && tar -zcf $module.tar.gz $module")
-    os.system(t.substitute({"parent_path": parent_path, "module": conf["module"]}))
-    conf["md5"] = md5sum(os.path.join(parent_path, conf["module"] + ".tar.gz"))
-    conf_path = os.path.join(parent_path, "config.json.js")
-    with codecs.open(conf_path, "w", "utf-8") as fw:
-        json.dump(conf, fw, sort_keys = True, indent = 4, ensure_ascii=False, encoding='utf8')
-    print u"build done", conf["module"] + ".tar.gz"
-    #hook_path = os.path.join(parent_path, "backup.sh")
-    #if os.path.isfile(hook_path):
-    #    os.system(hook_path)
+    def permissions(info):
+        info.uid = info.gid = 0
+        info.uname = info.gname = "root"
+        info.mode = 0o755 if info.isdir() or "/bin/" in info.name or info.name.endswith(".sh") else 0o644
+        return info
 
-build_module()
+    archive_path = ROOT / f"{module}.tar.gz"
+    with tarfile.open(archive_path, "w:gz", format=tarfile.USTAR_FORMAT) as archive:
+        archive.add(module_path, arcname=module, filter=permissions)
+    # 软件中心使用此字段校验离线包。
+    config["md5"] = hashlib.md5(archive_path.read_bytes()).hexdigest()
+    config_path.write_text(json.dumps(config, ensure_ascii=False, indent=4) + "\n", encoding="utf-8", newline="\n")
+    print(f"Built {archive_path.name} ({archive_path.stat().st_size:,} bytes)")
+
+
+if __name__ == "__main__":
+    build_module()
 

@@ -1,5 +1,12 @@
 KoolCenter RustDesk Server Changelog
 ===========================================
+1.4.9
+   - fix	直接读取 /proc/mounts 识别 /jffs 文件系统，修复 USB2JFFS 绑定挂载被 df 隐藏、额外挂载记录导致的误判
+   - fix	为 hbbs/hbbr 设置持久化 HOME 和 XDG_CONFIG_HOME，启动前检查数据及配置目录读写
+   - fix	升级优先保留磁盘上的密钥对和现有数据库，并将公钥同步到插件界面
+   - update	rustdesk-server 官方 ARMv7/musl 静态二进制 v1.1.16（hbbs、hbbr、rustdesk-utils）
+   - build	使用 Python 3 标准库生成离线安装包，统一脚本和二进制执行权限
+
 1.4.8
    - fix	调整页面js和css加载文件。
 

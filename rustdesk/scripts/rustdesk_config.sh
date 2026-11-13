@@ -57,32 +57,28 @@ dbus_rm() {
   fi
 }
 
-check_usb2jffs_used_status() {
-  # 查看当前/jffs的挂载点是什么设备，如/dev/mtdblock9, /dev/sda1；有usb2jffs的时候，/dev/sda1，无usb2jffs的时候，/dev/mtdblock9，出问题未正确挂载的时候，为空
-  local cur_patition=$(df -h | /bin/grep /jffs | awk '{print $1}')
-  local jffs_device="not mount"
-  if [ -n "${cur_patition}" ]; then
-    jffs_device=${cur_patition}
-  fi
-  local mounted_nu=$(mount | /bin/grep "${jffs_device}" | grep -E "/tmp/mnt/|/jffs" | /bin/grep -c "/dev/s")
-  if [ "${mounted_nu}" -eq "2" ]; then
-    echo "1" #已安装并成功挂载
-  else
-    echo "0" #未安装或未挂载
-  fi
-}
-
 start_jffs_test(){
-    if [ $(check_usb2jffs_used_status) == "1" ] && [ "${1}" == "start" ]; then
-      echo_date "➡️检测到已安装插件usb2jffs并成功挂载，插件可以正常启动！"
-    else
-      local LINUX_VER=$(uname -r | awk -F"." '{print $1$2}')
-      if [ "$LINUX_VER" = 41 ]; then # 报错停止
-        echo_date "❌️jffs分区不支持db文件读写，插件停止启动"
-        echo_date "❌️请安装安装usb2jffs插件并成功挂载后再次尝试！"
-        exit 0
-      fi
-    fi
+  # df 会隐藏同设备的绑定挂载，直接读取 /jffs 的实际文件系统。
+  local jffs_fs=$(awk '$2 == "/jffs" { fs = $3 } END { print fs }' /proc/mounts)
+  local LINUX_VER=$(uname -r | awk -F"." '{print $1"."$2}')
+  if [ "$LINUX_VER" = "4.1" ] && { [ "$jffs_fs" = "jffs2" ] || [ -z "$jffs_fs" ]; }; then
+    echo_date "❌️为避免 Linux 4.1 / JFFS2 的 SQLite 兼容性问题，请检查 usb2jffs 是否已将 ext4 分区挂载到 /jffs。"
+    return 1
+  fi
+
+  local probe
+  if ! mkdir -p "${rustdesk_db_flie_path}.config" || ! probe=$(mktemp "${rustdesk_db_flie_path}.write-test.XXXXXX"); then
+    echo_date "❌️无法创建 RustDesk 数据或配置文件，请检查 ${rustdesk_db_flie_path} 的挂载状态、权限和剩余空间。"
+    return 1
+  fi
+  if ! { printf '%s\n' rustdesk >"$probe" && [ "$(cat "$probe")" = "rustdesk" ]; }; then
+    rm -f "$probe"
+    echo_date "❌️RustDesk 数据目录读写失败，请检查 USB 分区是否可读写且空间充足。"
+    return 1
+  fi
+  rm -f "$probe"
+  chmod 700 "${rustdesk_db_flie_path}" "${rustdesk_db_flie_path}.config" || return 1
+  echo_date "🟢RustDesk 数据目录读写正常（文件系统：${jffs_fs:-未知}）。"
 }
 
 check_port_used() {
@@ -140,23 +136,25 @@ configServerEnv() {
 }
 
 start_hbbs() {
-  rm -rf ${RUN_LOG}
   local process_name="hbbs"
   local RUN_LOG=/tmp/upload/rustdesk_${process_name}_run_log.txt
+  rm -f "${RUN_LOG}"
   echo_date "🟠启动 $process_name 进程，开启进程实时守护..."
   mkdir -p /koolshare/perp/$process_name
   cat >/koolshare/perp/$process_name/rc.main <<-EOF
 		#!/bin/sh
 		source /koolshare/scripts/base.sh
-		export DB_URL=${rustdesk_db_flie_path}db_v2.sqlite3
+		export HOME="${rustdesk_db_flie_path%/}"
+		export XDG_CONFIG_HOME="${rustdesk_db_flie_path}.config"
+		export DB_URL="${rustdesk_db_flie_path}db_v2.sqlite3"
 		export PORT=$hbbs_used_port
 		export RELAY_SERVERS=$rustdesk_hbbr_host
 		export ALWAYS_USE_RELAY=$ALWAYS_USE_RELAY
 
 		CMD="${hbbsCMD}"
 		if test \${1} = 'start' ; then
-			cd $rustdesk_db_flie_path
 			exec >${RUN_LOG} 2>&1
+			cd "${rustdesk_db_flie_path}" || exit 1
 			exec \$CMD
 		fi
 		exit 0
@@ -179,6 +177,8 @@ start_hbbr() {
   cat >/koolshare/perp/$process_name/rc.main <<-EOF
 		#!/bin/sh
 		source /koolshare/scripts/base.sh
+		export HOME="${rustdesk_db_flie_path%/}"
+		export XDG_CONFIG_HOME="${rustdesk_db_flie_path}.config"
 		export PORT=$hbbs_used_port
 		#export LIMIT_SPEED=$rustdesk_speed_limit
 		#export SINGLE_BANDWIDTH=$rustdesk_hbbr_single_bandwidth
@@ -186,8 +186,8 @@ start_hbbr() {
 
 		CMD="${hbbrCMD}"
 		if test \${1} = 'start' ; then
-		  cd $rustdesk_db_flie_path
 		      exec >${RUN_LOG} 2>&1
+		      cd "${rustdesk_db_flie_path}" || exit 1
 		      exec \$CMD
 		fi
 		exit 0
@@ -293,7 +293,7 @@ check_status() {
     fi
   fi
 
-  http_response $status_text
+  http_response "$status_text"
 }
 
 stop_process() {
@@ -315,16 +315,16 @@ stop_plugin() {
 start_process() {
   start_hbbs
   start_hbbr
-  if [ -z ${bin_all_run} ]; then
+  if [ -z "${bin_all_run}" ]; then
     echo_date "❌️进程启动失败，停止插件..."
     stop_plugin
-    exit
+    return 1
   fi
 }
 
 start() {
   # 0. test jffs and config ENV
-  start_jffs_test "start"
+  start_jffs_test "start" || return 1
   configServerEnv
 
   # 1. stop first
@@ -334,7 +334,7 @@ start() {
   # 2.1 check_port_used
   check_port_used
   # 2.2 start process
-  start_process
+  start_process || return 1
 
   # 3. open port
   close_port >/dev/null 2>&1
