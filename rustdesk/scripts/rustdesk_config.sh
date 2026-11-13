@@ -66,18 +66,31 @@ start_jffs_test(){
     return 1
   fi
 
-  local probe
-  if ! mkdir -p "${rustdesk_db_flie_path}.config" || ! probe=$(mktemp "${rustdesk_db_flie_path}.write-test.XXXXXX"); then
-    echo_date "❌️无法创建 RustDesk 数据或配置文件，请检查 ${rustdesk_db_flie_path} 的挂载状态、权限和剩余空间。"
+  if ! mkdir -p "${rustdesk_db_flie_path}.config" 2>&1; then
+    echo_date "❌️创建配置目录失败：${rustdesk_db_flie_path}.config"
     return 1
   fi
-  if ! { printf '%s\n' rustdesk >"$probe" && [ "$(cat "$probe")" = "rustdesk" ]; }; then
+  if ! chmod 700 "${rustdesk_db_flie_path}" "${rustdesk_db_flie_path}.config" 2>&1; then
+    echo_date "❌️设置 RustDesk 数据目录权限失败：${rustdesk_db_flie_path}"
+    return 1
+  fi
+  # 固件未必提供 mktemp；独占创建测试文件，保留同名旧文件。
+  local probe="${rustdesk_db_flie_path}.write-test.$$"
+  if ! (umask 077; set -C; printf '%s\n' rustdesk >"$probe") 2>&1; then
+    echo_date "❌️写入测试文件失败：${probe}，请检查分区读写状态、剩余空间及上方系统错误。"
+    return 1
+  fi
+  local content
+  if ! content=$(cat "$probe" 2>&1); then
     rm -f "$probe"
-    echo_date "❌️RustDesk 数据目录读写失败，请检查 USB 分区是否可读写且空间充足。"
+    echo_date "❌️读取测试文件失败：${content}"
     return 1
   fi
   rm -f "$probe"
-  chmod 700 "${rustdesk_db_flie_path}" "${rustdesk_db_flie_path}.config" || return 1
+  if [ "$content" != "rustdesk" ]; then
+    echo_date "❌️RustDesk 数据目录读写校验失败：${rustdesk_db_flie_path}"
+    return 1
+  fi
   echo_date "🟢RustDesk 数据目录读写正常（文件系统：${jffs_fs:-未知}）。"
 }
 

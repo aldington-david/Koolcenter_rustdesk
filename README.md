@@ -12,6 +12,8 @@
 
 `hbbs` 和 `hbbr` 的工作目录、密钥和数据库继续使用 `/koolshare/configs/rustdesk/`；服务的 `HOME` 固定到这个目录，`XDG_CONFIG_HOME` 固定到其中的 `.config/`，解决继承的配置路径不可写所触发的 `Failed to store config: Failed to create directory`。
 
+rc.3 的启动读写检查使用基础 Shell 操作，支持未提供 `mktemp` 的精简固件。目录创建、权限设置、文件写入和读取失败会分别记录，并保留系统错误，方便定位具体原因。
+
 启动日志应显示「RustDesk 数据目录读写正常（文件系统：ext4）」，页面上的两个程序版本均为 `1.1.16`，随后显示 `hbbs` 和 `hbbr` 正常运行。Linux 4.1 原生 JFFS2 的兼容性拦截继续保留；遇到此提示时，应检查 USB2JFFS 是否确实把 ext4 分区挂载到了 `/jffs`。
 
 ### 构建与验证

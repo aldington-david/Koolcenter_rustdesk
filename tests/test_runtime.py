@@ -71,6 +71,37 @@ module=rustdesk
         self.assertIn("START_ALLOWED", result.stdout)
         self.assertNotIn("jffs分区不支持db文件读写", result.stdout)
 
+    def test_firmware_without_mktemp_can_start(self):
+        result = self.shell("""
+mktemp() { echo 'mktemp: not found' >&2; return 127; }
+start_jffs_test start || exit $?
+echo START_ALLOWED
+""")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("START_ALLOWED", result.stdout)
+        self.assertEqual(list(self.data.glob(".write-test.*")), [])
+
+    def test_config_directory_conflict_is_identified_in_start_log(self):
+        config = self.data / ".config"
+        config.write_text("keep-existing-file")
+        result = self.shell('export LC_ALL=C; start_jffs_test start')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("创建配置目录失败", result.stdout)
+        self.assertIn(".config", result.stdout)
+        self.assertIn("File exists", result.stdout)
+        self.assertEqual(config.read_text(), "keep-existing-file")
+
+    def test_write_probe_keeps_an_existing_file(self):
+        result = self.shell("""
+printf '%s' keep-existing-file >"${rustdesk_db_flie_path}.write-test.$$"
+start_jffs_test start
+""")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("写入测试文件失败", result.stdout)
+        probes = list(self.data.glob(".write-test.*"))
+        self.assertEqual(len(probes), 1)
+        self.assertEqual(probes[0].read_text(), "keep-existing-file")
+
     def test_extra_usb_mounts_do_not_block_start(self):
         result = self.shell("""
 df() { echo '/dev/sda1 117G 2G 115G 2% /jffs'; }

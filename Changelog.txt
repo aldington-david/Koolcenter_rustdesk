@@ -1,6 +1,7 @@
 KoolCenter RustDesk Server Changelog
 ===========================================
 1.4.9
+   - fix	rc.3 移除启动检查对 mktemp 的依赖，兼容精简固件；分别记录目录创建、权限设置和文件读写的具体错误
    - fix	直接读取 /proc/mounts 识别 /jffs 文件系统，修复 USB2JFFS 绑定挂载被 df 隐藏、额外挂载记录导致的误判
    - fix	为 hbbs/hbbr 设置持久化 HOME 和 XDG_CONFIG_HOME，启动前检查数据及配置目录读写
    - fix	升级优先保留磁盘上的密钥对和现有数据库，并将公钥同步到插件界面
